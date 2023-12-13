@@ -1,11 +1,11 @@
-extern crate rand;
 extern crate clap;
+extern crate rand;
 
-use rand::{Rng, seq::SliceRandom};
+use clap::{App, Arg};
+use rand::{seq::SliceRandom, Rng};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, Write};
-use clap::{App, Arg};
 
 type Cell = (usize, usize);
 type Wall = (Cell, Cell);
@@ -24,10 +24,11 @@ impl Maze {
         let mut rng = rand::thread_rng();
         let mut stickiness = vec![vec![0; width + 2]; height + 2];
 
+        // Outer walls marked with 'X'
         for x in 0..width + 2 {
             for y in 0..height + 2 {
                 if x == 0 || y == 0 || x == width + 1 || y == height + 1 {
-                    stickiness[y][x] = 0; // Outer walls
+                    stickiness[y][x] = b'X';
                 } else {
                     if x < width + 1 {
                         walls.insert(((x, y), (x + 1, y)));
@@ -40,7 +41,13 @@ impl Maze {
             }
         }
 
-        Maze { width, height, walls, stickiness, open_walls: HashSet::new() }
+        Maze {
+            width,
+            height,
+            walls,
+            stickiness,
+            open_walls: HashSet::new(),
+        }
     }
 
     fn generate(&mut self) {
@@ -53,8 +60,11 @@ impl Maze {
         for wall in wall_list {
             let (cell1, cell2) = wall;
 
-            // Skip if it's an outer wall
-            if cell1.0 == 0 || cell1.1 == 0 || cell2.0 == self.width + 1 || cell2.1 == self.height + 1 {
+            if cell1.0 == 0
+                || cell1.1 == 0
+                || cell2.0 == self.width + 1
+                || cell2.1 == self.height + 1
+            {
                 continue;
             }
 
@@ -75,33 +85,25 @@ impl Maze {
     fn add_map(&mut self) {
         let mut rng = rand::thread_rng();
 
-        // Collect non-wall cell coordinates separately
         let mut non_wall_cells: Vec<Cell> = Vec::new();
         for y in 1..=self.height {
             for x in 1..=self.width {
-                if self.stickiness[y][x] != 0 {
+                if self.stickiness[y][x] != b'X' {
                     non_wall_cells.push((x, y));
                 }
             }
         }
 
-        // Shuffle and select positions for 'S' and 'G'
         non_wall_cells.shuffle(&mut rng);
 
-        if non_wall_cells.len() >= 1 {
-            if let Some((start_x, start_y)) = non_wall_cells.pop() {
-                self.stickiness[start_y][start_x] = b'S';
-            }
-        }
+        if non_wall_cells.len() >= 2 {
+            let (start_x, start_y) = non_wall_cells.pop().unwrap();
+            self.stickiness[start_y][start_x] = b'S';
 
-        if non_wall_cells.len() >= 1 {
-            if let Some((goal_x, goal_y)) = non_wall_cells.pop() {
-                self.stickiness[goal_y][goal_x] = b'G';
-            }
-        }
-
-        if non_wall_cells.len() < 2 {
-            eprintln!("Warning: Only one non-wall cell available. Only 'S' or 'G' was placed.");
+            let (goal_x, goal_y) = non_wall_cells.pop().unwrap();
+            self.stickiness[goal_y][goal_x] = b'G';
+        } else {
+            eprintln!("Not enough non-wall cells to place 'S' and 'G'.");
         }
     }
 }
@@ -133,18 +135,27 @@ impl UnionFind {
     }
 }
 
+fn get_print_character(maze: &Maze, x: usize, y: usize) -> char {
+    match maze.stickiness[y][x] {
+        b'S' => 'S',
+        b'G' => 'G',
+        b'X' => 'X',
+        _ => {
+            if !maze.open_walls.contains(&((x, y), (x + 1, y)))
+                && !maze.open_walls.contains(&((x, y), (x, y + 1)))
+            {
+                'X'
+            } else {
+                char::from_digit(maze.stickiness[y][x] as u32, 10).unwrap_or(' ')
+            }
+        }
+    }
+}
+
 fn print_maze(maze: &Maze) {
     for y in 0..maze.height + 2 {
         for x in 0..maze.width + 2 {
-            if maze.stickiness[y][x] == 0 || (!maze.open_walls.contains(&((x, y), (x + 1, y))) && !maze.open_walls.contains(&((x, y), (x, y + 1)))) {
-                print!("X");
-            } else {
-                print!("{}", if maze.stickiness[y][x] == b'S' || maze.stickiness[y][x] == b'G' {
-                    maze.stickiness[y][x] as char
-                } else {
-                    char::from_digit(maze.stickiness[y][x] as u32, 10).unwrap()
-                });
-            }
+            print!("{}", get_print_character(maze, x, y));
         }
         println!();
     }
@@ -155,15 +166,7 @@ fn save_to_file(maze: &Maze, file_name: &str) -> io::Result<()> {
 
     for y in 0..maze.height + 2 {
         for x in 0..maze.width + 2 {
-            if maze.stickiness[y][x] == 0 || (!maze.open_walls.contains(&((x, y), (x + 1, y))) && !maze.open_walls.contains(&((x, y), (x, y + 1)))) {
-                write!(file, "X")?;
-            } else {
-                write!(file, "{}", if maze.stickiness[y][x] == b'S' || maze.stickiness[y][x] == b'G' {
-                    maze.stickiness[y][x] as char
-                } else {
-                    char::from_digit(maze.stickiness[y][x] as u32, 10).unwrap()
-                })?;
-            }
+            write!(file, "{}", get_print_character(maze, x, y))?;
         }
         writeln!(file)?;
     }
@@ -197,8 +200,16 @@ fn main() {
             .help("Include a start (S) and goal (G) in the maze"))
         .get_matches();
 
-    let width = matches.value_of("width").unwrap_or("10").parse().unwrap_or(10);
-    let height = matches.value_of("height").unwrap_or("10").parse().unwrap_or(10);
+    let width = matches
+        .value_of("width")
+        .unwrap_or("10")
+        .parse()
+        .unwrap_or(10);
+    let height = matches
+        .value_of("height")
+        .unwrap_or("10")
+        .parse()
+        .unwrap_or(10);
     let output_file = matches.value_of("output");
     let include_map = matches.is_present("map");
 
@@ -214,7 +225,7 @@ fn main() {
             if let Err(e) = save_to_file(&maze, file_name) {
                 eprintln!("Error saving to file: {}", e);
             }
-        },
+        }
         None => print_maze(&maze),
     }
 }
