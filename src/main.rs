@@ -182,7 +182,7 @@ fn save_to_file(maze: &Maze, file_name: &str) -> io::Result<()> {
 fn main() {
     let matches = App::new("Maze Generator")
         .version("1.1")
-        .author("Your Name <your_email@example.com>")
+        .author("Metee Yingyongwatthanakit <metee.ying@gmail.com>")
         .about("Generates a maze with Kruskal's algorithm, assigns stickiness to each cell, and can mark a start and goal")
         .arg(Arg::with_name("width")
             .short('w')
